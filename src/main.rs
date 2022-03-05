@@ -1,55 +1,27 @@
-#![no_std]
 #![no_main]
+#![no_std]
+#![feature(abi_efiapi)]
 
-use core::panic::PanicInfo;
-use core::arch::asm;
-use vga::writers::{Graphics640x480x16, GraphicsWriter};
-use vga::colors::{Color16, TextModeColor};
-use vga::writers::{ScreenCharacter, TextWriter, Text80x25};
+use core::fmt::Write;
+use log::info;
+use uefi::prelude::*;
+use uefi::table::runtime::ResetType;
+use uefi::ResultExt;
 
-mod vga_buffer;
+#[entry]
+fn efi_main(_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
+    uefi_services::init(&mut system_table).unwrap_success();
 
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
-    // let mode = Graphics640x480x16::new();
-    // mode.set_mode();
-    // mode.clear_screen(Color16::Black);
-    // mode.draw_line((80, 60), (80, 420), Color16::White);
-    // mode.draw_line((80, 60), (540, 60), Color16::White);
-    // mode.draw_line((80, 420), (540, 420), Color16::White);
-    // mode.draw_line((540, 420), (540, 60), Color16::White);
-    // mode.draw_line((80, 90), (540, 90), Color16::White);
-    // for (offset, character) in "Hello World!".chars().enumerate() {
-    //     mode.draw_character(270 + offset * 8, 72, character, Color16::White)
-    // }
+    system_table.stdout().reset(false).unwrap_success();
 
-    println!("Hello World{}", "!");
+    writeln!(system_table.stdout(), "[writeln] Hello, world from writeln").unwrap();
+    info!("[info] Hello, world from info");
 
-    // let text_mode = Text80x25::new();
-    // let color = TextModeColor::new(Color16::Yellow, Color16::Black);
-    // let screen_character = ScreenCharacter::new(b'T', color);
-    // text_mode.set_mode();
-    // text_mode.clear_screen();
-    // text_mode.write_character(0, 0, screen_character);
-
-    loop {
-      hlt()
-    }
-}
-
-#[no_mangle]
-fn hlt() {
-    unsafe {
-        // assembly で "HLT" したのと同じ効果がある。
-        asm!("hlt");
-    }
-}
-
-/// This function is called on panic.
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
-    loop {
-        hlt()
-    }
+    // Status::SUCCESS
+    // Stalls the processor for an amount of time. 300 seconds.
+    system_table.boot_services().stall(300_000_000);
+    system_table.stdout().reset(false).unwrap_success();
+    system_table
+        .runtime_services()
+        .reset(ResetType::Shutdown, Status::SUCCESS, None);
 }

@@ -3,14 +3,7 @@ name = "kardos"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-bootloader = "0.9.8"
-volatile = "0.2.6"
-spin = "0.5.2"
-vga = "0.2.7"
-
-[dependencies.lazy_static]
-version = "1.0"
-features = ["spin_no_std"]
+uefi = { version = "0.14.0", features = ["exts"] }
+uefi-services = "0.11.0"
+log = {version = "0.4", default-features = false}
