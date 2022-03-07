@@ -54,7 +54,7 @@ fn create_file(image_handle: Handle, system_table: &SystemTable<Boot>) -> Regula
 
     let file_handle: FileHandle = directory
         .open(
-            "memory_map.txt",
+            "memory_map.csv",
             FileMode::CreateReadWrite,
             FileAttribute::empty(),
         )
