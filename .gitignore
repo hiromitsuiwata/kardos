@@ -11,3 +11,6 @@ Cargo.lock
 
 /mnt/EFI/BOOT/BOOTX64.EFI
 OVMF_VARS_MOD.fd
+
+disk.img
+memory_map.txt
