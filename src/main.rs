@@ -10,22 +10,65 @@ use core::fmt::Write;
 use core::mem;
 use log::info;
 use uefi::prelude::*;
-use uefi::proto::media::file::{
-    Directory, File, FileAttribute, FileInfo, FileMode, FileType, RegularFile,
-};
-use uefi::table::boot::{MemoryDescriptor, ScopedProtocol};
+use uefi::proto::media::file::{Directory, File, FileAttribute, FileHandle, FileMode, RegularFile};
+use uefi::table::boot::MemoryDescriptor;
 use uefi::table::runtime::ResetType;
 use uefi::ResultExt;
 
 #[entry]
 fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     uefi_services::init(&mut system_table).unwrap_success();
-
     system_table.stdout().reset(false).unwrap_success();
+    writeln!(system_table.stdout(), "start efi_main...").unwrap();
 
-    writeln!(system_table.stdout(), "[writeln] Hello, world from writeln").unwrap();
-    info!("[info] Hello, world from info");
+    // メモリマップ書き込み先のファイルを作成
+    info!("create a file");
+    let file = create_file(image_handle, &system_table);
 
+    // メモリマップ書き込み
+    info!("write memory map");
+    write_memory_descriptor(&system_table, file);
+
+    // シャットダウンまで10秒待機
+    info!("complete");
+    writeln!(system_table.stdout(), "waiting until shutdown...").unwrap();
+    system_table.boot_services().stall(10_000_000);
+    system_table.stdout().reset(false).unwrap_success();
+    // シャットダウン
+    system_table
+        .runtime_services()
+        .reset(ResetType::Shutdown, Status::SUCCESS, None);
+}
+
+fn create_file(image_handle: Handle, system_table: &SystemTable<Boot>) -> RegularFile {
+    let file_system = unsafe {
+        &mut *system_table
+            .boot_services()
+            .get_image_file_system(image_handle)
+            .unwrap_success()
+            .interface
+            .get()
+    };
+
+    let mut directory: Directory = file_system.open_volume().unwrap_success();
+
+    let file_handle: FileHandle = directory
+        .open(
+            "memory_map.txt",
+            FileMode::CreateReadWrite,
+            FileAttribute::empty(),
+        )
+        .unwrap_success();
+
+    //RegularFile
+    let file: RegularFile;
+    unsafe {
+        file = RegularFile::new(file_handle);
+    }
+    return file;
+}
+
+fn write_memory_descriptor(system_table: &SystemTable<Boot>, mut file: RegularFile) {
     let size = system_table.boot_services().memory_map_size().map_size
         + 8 * mem::size_of::<MemoryDescriptor>();
     let mut buffer = vec![0; size];
@@ -34,29 +77,8 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
         .memory_map(&mut buffer)
         .unwrap_success();
 
-    let file_handle = unsafe {
-        &mut *system_table
-            .boot_services()
-            .get_image_file_system(image_handle)
-            .unwrap_success()
-            .interface
-            .get()
-    }
-    .open_volume()
-    .unwrap_success()
-    .open(
-        "memory_map.txt",
-        FileMode::CreateReadWrite,
-        FileAttribute::empty(),
-    )
-    .unwrap_success();
-
-    //RegularFile
-    let mut file: RegularFile;
-    unsafe {
-        file = RegularFile::new(file_handle);
-    }
-
+    file.write("Index, Type, Type(name), PhysicalStart, NumberOfPages, Attribute\n".as_bytes())
+        .unwrap_success();
     for (i, d) in descriptors.enumerate() {
         let line = format!(
             "{}, {:x}, {:?}, {:08x}, {:x}, {:x}\n",
@@ -68,15 +90,6 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
             d.att.bits() & 0xfffff
         );
         file.write(line.as_bytes()).unwrap_success();
-        write!(system_table.stdout(), r#"{}"#, line).unwrap();
     }
     file.flush().unwrap_success();
-
-    // Status::SUCCESS
-    // Stalls the processor for an amount of time. 300 seconds.
-    system_table.boot_services().stall(300_000_000);
-    system_table.stdout().reset(false).unwrap_success();
-    system_table
-        .runtime_services()
-        .reset(ResetType::Shutdown, Status::SUCCESS, None);
 }

@@ -13,4 +13,4 @@ Cargo.lock
 OVMF_VARS_MOD.fd
 
 disk.img
-memory_map.txt
+memory_map.csv
