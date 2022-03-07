@@ -1,4 +1,5 @@
 [workspace]
 members = [
-  "kardos-bootloader"
+  "kardos-bootloader",
+  "kardos-kernel"
 ]

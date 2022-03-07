@@ -2,9 +2,9 @@
 
 ## 参照
 
-- https://os.phil-opp.com/ja/freestanding-rust-binary/
-- https://github.com/uchan-nos/mikanos-build
-- https://zenn.dev/yubrot/scraps/9735639c0c982d
+- <https://zenn.dev/yubrot/scraps/9735639c0c982d>
+- <https://os.phil-opp.com/ja/freestanding-rust-binary/>
+- <https://github.com/uchan-nos/mikanos-build>
 
 ```bash
 cargo install bootimage
