@@ -63,13 +63,13 @@ impl PixelWriter for BgrPixelWriter {
 fn render_example<W: PixelWriter>(fb: &FrameBuffer) {
     for x in 0..fb.resolution.0 {
         for y in 0..fb.resolution.1 {
-            W::put_pixel(fb, x, y, (255, 255, 255));
+            W::put_pixel(fb, x, y, ((x % 256) as u8, (y % 256) as u8, 255));
         }
     }
 
     for x in 50..250 {
         for y in 50..150 {
-            W::put_pixel(fb, x, y, (50, 155, 255));
+            W::put_pixel(fb, x, y, (255, 0, 0));
         }
     }
 }
