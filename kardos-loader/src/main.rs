@@ -6,17 +6,19 @@
 #[macro_use]
 extern crate alloc;
 
+use alloc::vec::Vec;
 use core::fmt::Write;
 use core::{mem, slice};
 use goblin::elf;
 use log::info;
 use uefi::prelude::*;
-use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
+use uefi::proto::console::gop::{GraphicsOutput, Mode, ModeInfo, PixelFormat};
 use uefi::proto::media::file::{
     Directory, File, FileAttribute, FileHandle, FileInfo, FileMode, RegularFile,
 };
 use uefi::table::boot::{AllocateType, MemoryDescriptor, MemoryType};
 use uefi::table::runtime::ResetType;
+use uefi::table::Runtime;
 use uefi::ResultExt;
 
 const EFI_PAGE_SIZE: usize = 0x1000;
@@ -53,18 +55,71 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
 
     // カーネル読み込み
     info!("load kernel");
-    load_kernel(image_handle, &system_table);
+    let entry_point_addr = load_kernel(image_handle, &system_table);
 
-    // シャットダウンまで120秒待機
+    // ELFのヘッダーのエントリーポイントのアドレスを関数ポインタとして扱う
+    // その関数はFrameBufferを引数とする
+    let entry_point: extern "sysv64" fn(&FrameBuffer) = unsafe { mem::transmute(entry_point_addr) };
+
+    // 画面出力のためのFrameBufferオブジェクトを作成する
+    let graphics_output_unsafe = system_table
+        .boot_services()
+        .locate_protocol::<GraphicsOutput>()
+        .unwrap_success();
+    let graphics_output = unsafe { &mut *graphics_output_unsafe.get() };
+
+    // 他のモードを取得する
+    let modes = graphics_output.modes();
+    for (i, mode) in modes.enumerate() {
+        let m: Mode = mode.unwrap();
+        let (horizontal, vertical) = m.info().resolution();
+        info!("{}, horizontal: {}, vertical: {}", i, horizontal, vertical);
+    }
+
+    // ローダーの挙動を目で見るために3秒待機
+    system_table.boot_services().stall(3_000_000);
+
+    // 指定した解像度を持つモードへ変更
+    let m = graphics_output.modes().nth(18).unwrap().unwrap();
+    graphics_output.set_mode(&m).unwrap_success();
+
+    // カーネルに渡すフレームバッファを作成
+    let frame_buffer = FrameBuffer {
+        frame_buffer: graphics_output.frame_buffer().as_mut_ptr(),
+        stride: graphics_output.current_mode_info().stride() as u32,
+        resolution: (
+            graphics_output.current_mode_info().resolution().0 as u32,
+            graphics_output.current_mode_info().resolution().1 as u32,
+        ),
+        format: match graphics_output.current_mode_info().pixel_format() {
+            PixelFormat::Rgb => MyPixelFormat::Rgb,
+            PixelFormat::Bgr => MyPixelFormat::Bgr,
+            f => panic!("Unsupported pixel format: {:?}", f),
+        },
+    };
+
+    // ブートサービスの停止
+    let enough_mmap_size = system_table.boot_services().memory_map_size().map_size
+        + 8 * mem::size_of::<MemoryDescriptor>();
+    let mut mmap_buf = vec![0; enough_mmap_size];
+    let (system_table, _) = system_table
+        .exit_boot_services(image_handle, &mut mmap_buf[..])
+        .expect_success("Failed to exit boot services");
+    mem::forget(mmap_buf);
+
+    // カーネル呼び出し
+    entry_point(&frame_buffer);
+
     info!("complete");
-    writeln!(system_table.stdout(), "waiting until shutdown...").unwrap();
-    system_table.boot_services().stall(120_000_000);
-    system_table.stdout().reset(false).unwrap_success();
     // シャットダウン
-    system_table
-        .runtime_services()
-        .reset(ResetType::Shutdown, Status::SUCCESS, None);
+    unsafe {
+        system_table
+            .runtime_services()
+            .reset(ResetType::Shutdown, Status::SUCCESS, None);
+    }
 }
+
+fn change_resolution(graphics_output: GraphicsOutput, image_handle: Handle) {}
 
 fn create_file(image_handle: Handle, system_table: &SystemTable<Boot>) -> RegularFile {
     let file_system = unsafe {
@@ -120,7 +175,8 @@ fn write_memory_descriptor(system_table: &SystemTable<Boot>, mut file: RegularFi
     file.flush().unwrap_success();
 }
 
-fn load_kernel(image_handle: Handle, system_table: &SystemTable<Boot>) {
+/// 指定したパスのファイルのRegularFileを取得する
+fn get_file(image_handle: Handle, system_table: &SystemTable<Boot>, filepath: &str) -> RegularFile {
     let file_system = unsafe {
         &mut *system_table
             .boot_services()
@@ -133,43 +189,64 @@ fn load_kernel(image_handle: Handle, system_table: &SystemTable<Boot>) {
     let mut root_dir: Directory = file_system.open_volume().unwrap_success();
 
     let file_handle: FileHandle = root_dir
-        .open(
-            "kernel.elf",
-            FileMode::CreateReadWrite,
-            FileAttribute::empty(),
-        )
+        .open(&filepath, FileMode::CreateReadWrite, FileAttribute::empty())
         .unwrap_success();
 
     //RegularFile
-    let mut file: RegularFile;
+    let file: RegularFile;
     unsafe {
         file = RegularFile::new(file_handle);
     }
+    file
+}
 
+fn size_of(file: &mut RegularFile) -> usize {
     let size = file
         .get_boxed_info::<FileInfo>()
         .unwrap_success()
         .file_size() as usize;
+    size
+}
 
+fn read_file_to_vec(file: &mut RegularFile) -> Vec<u8> {
+    let size = size_of(file);
     info!("elf size: {}", size);
+
     let mut buf = vec![0; size];
     file.read(&mut buf).unwrap_success();
+    buf
+}
 
-    info!("elf header: {:?}", &buf[0..20]);
-    let elf = elf::Elf::parse(&buf).expect("Failed to parse ELF");
+fn load_kernel(image_handle: Handle, system_table: &SystemTable<Boot>) -> usize {
+    let mut file = get_file(image_handle, system_table, "kernel.elf");
+
+    let buf = read_file_to_vec(&mut file);
+    info!("elf header: {:?}", &buf[0..16]);
 
     info!("load elf");
+    let elf = elf::Elf::parse(&buf).expect("Failed to parse ELF");
 
+    // ELFの複数のプログラムヘッダのなかのLOADセグメントの先頭と末尾のアドレスを探す
     let mut dest_start = usize::MAX;
     let mut dest_end = 0;
-    for ph in elf.program_headers.iter() {
-        if ph.p_type != elf::program_header::PT_LOAD {
+    for program_header in elf.program_headers.iter() {
+        if program_header.p_type != elf::program_header::PT_LOAD {
             continue;
         }
-        dest_start = dest_start.min(ph.p_vaddr as usize);
-        dest_end = dest_end.max((ph.p_vaddr + ph.p_memsz) as usize);
+        dest_start = dest_start.min(program_header.p_vaddr as usize);
+        dest_end = dest_end.max((program_header.p_vaddr + program_header.p_memsz) as usize);
     }
 
+    // dest_startがlldの--image-baseオプションで指定したアドレス0x100000番地になっているはず
+    info!("dest_start: {:x}", dest_start);
+    info!("dest_end: {:x}", dest_end);
+    info!(
+        "page_size: {:x}",
+        (dest_end - dest_start + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE
+    );
+
+    // コピー先となるメモリ領域を確保する
+    // lldの--image-baseオプションで指定したアドレス（メモリマップから十分な大きさを持つCONVENTIONALの領域）へアドレス決め打ちで配置したい
     system_table
         .boot_services()
         .allocate_pages(
@@ -179,41 +256,34 @@ fn load_kernel(image_handle: Handle, system_table: &SystemTable<Boot>) {
         )
         .expect_success("Failed to allocate pages for kernel");
 
-    for ph in elf.program_headers.iter() {
-        if ph.p_type != elf::program_header::PT_LOAD {
+    // ELFの仮想アドレスへmemcopyでコピーする
+    for program_header in elf.program_headers.iter() {
+        if program_header.p_type != elf::program_header::PT_LOAD {
             continue;
         }
-        let ofs = ph.p_offset as usize;
-        let fsize = ph.p_filesz as usize;
-        let msize = ph.p_memsz as usize;
-        let dest = unsafe { slice::from_raw_parts_mut(ph.p_vaddr as *mut u8, msize) };
+        let ofs = program_header.p_offset as usize;
+        let fsize = program_header.p_filesz as usize;
+        let msize = program_header.p_memsz as usize;
+        // 指定したアドレスに配置されるスライスを作る
+        let dest = unsafe { slice::from_raw_parts_mut(program_header.p_vaddr as *mut u8, msize) };
+        // 作ったスライスにELFファイルを読み込んだメモリ領域のデータをコピーする
         dest[..fsize].copy_from_slice(&buf[ofs..ofs + fsize]);
         dest[fsize..].fill(0);
     }
 
-    info!("load entry_point");
-    let entry_point: extern "sysv64" fn(&FrameBuffer) = unsafe { mem::transmute(elf.entry) };
+    // ELFのヘッダーのエントリーポイントのアドレスを関数ポインタとして扱う
+    // その関数はFrameBufferを引数とする
+    //let entry_point: extern "sysv64" fn(&FrameBuffer) = unsafe { mem::transmute(elf.entry) };
 
-    info!("frame_buffer");
-    let gop = system_table
-        .boot_services()
-        .locate_protocol::<GraphicsOutput>()
-        .unwrap_success();
-    let gop = unsafe { &mut *gop.get() };
-    let frame_buffer = FrameBuffer {
-        frame_buffer: gop.frame_buffer().as_mut_ptr(),
-        stride: gop.current_mode_info().stride() as u32,
-        resolution: (
-            gop.current_mode_info().resolution().0 as u32,
-            gop.current_mode_info().resolution().1 as u32,
-        ),
-        format: match gop.current_mode_info().pixel_format() {
-            PixelFormat::Rgb => MyPixelFormat::Rgb,
-            PixelFormat::Bgr => MyPixelFormat::Bgr,
-            f => panic!("Unsupported pixel format: {:?}", f),
-        },
-    };
+    // info!("exit boot services");
+    // let enough_mmap_size = system_table.boot_services().memory_map_size().map_size
+    //     + 8 * mem::size_of::<MemoryDescriptor>();
+    // let mut mmap_buf = vec![0; enough_mmap_size];
+    // &system_table.exit_boot_services(image_handle, &mut mmap_buf[..]);
+    // mem::forget(mmap_buf);
 
-    info!("invoke entry_point");
-    entry_point(&frame_buffer);
+    //info!("invoke entry_point");
+    //(entry_point, &frame_buffer);
+
+    elf.entry as usize
 }
