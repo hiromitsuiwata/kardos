@@ -15,3 +15,5 @@ OVMF_VARS_MOD.fd
 disk.img
 memory_map.csv
 kernel.elf
+
+.vscode/

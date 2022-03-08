@@ -3,13 +3,13 @@ clean:
 	rm -rf img
 	rm memory_map.csv
 
-bootloader:
-	cd kardos-bootloader && cargo build
+loader:
+	cd kardos-loader && cargo build
 
 kernel:
 	cd kardos-kernel && cargo build
 
-image: bootloader kernel
+image: loader kernel
 	rm -rf ./img
 	mkdir ./img
 	qemu-img create -f raw ./img/disk.img 200M
@@ -18,7 +18,7 @@ image: bootloader kernel
 	mkdir -p mnt
 	sudo mount -o loop ./img/disk.img mnt
 	sudo mkdir -p mnt/EFI/BOOT
-	sudo cp ./target/x86_64-unknown-uefi/debug/kardos-bootloader.efi ./mnt/EFI/BOOT/BOOTX64.EFI
+	sudo cp ./target/x86_64-unknown-uefi/debug/kardos-loader.efi ./mnt/EFI/BOOT/BOOTX64.EFI
 	sudo cp ./target/x86_64-unknown-none-elf/debug/kardos-kernel.elf ./mnt/kernel.elf
 	sudo umount mnt
 
@@ -33,11 +33,11 @@ run_image: image
 	cp mnt/memory_map.csv ./
 	sudo umount mnt
 
-run_efi: bootloader kernel
+run_efi: loader kernel
 	cp ./OVMF/OVMF_VARS.fd ./OVMF/OVMF_VARS_MOD.fd
 	rm -rf ./mnt
 	mkdir -p ./mnt/EFI/BOOT
-	cp ./target/x86_64-unknown-uefi/debug/kardos-bootloader.efi ./mnt/EFI/BOOT/BOOTX64.EFI
+	cp ./target/x86_64-unknown-uefi/debug/kardos-loader.efi ./mnt/EFI/BOOT/BOOTX64.EFI
 	cp ./target/x86_64-unknown-none-elf/debug/kardos-kernel.elf ./mnt/kernel.elf
 	qemu-system-x86_64 \
 	    -drive if=pflash,format=raw,readonly,file=./OVMF/OVMF_CODE.fd \
