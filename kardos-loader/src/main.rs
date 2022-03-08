@@ -68,22 +68,44 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
         .unwrap_success();
     let graphics_output = unsafe { &mut *graphics_output_unsafe.get() };
 
-    // 他のモードを取得する
-    let modes = graphics_output.modes();
-    for (i, mode) in modes.enumerate() {
-        let m: Mode = mode.unwrap();
-        let (horizontal, vertical) = m.info().resolution();
-        info!("{}, horizontal: {}, vertical: {}", i, horizontal, vertical);
+    // 解像度を変更する
+    change_resolution(graphics_output, image_handle, &system_table);
+
+    // カーネルに渡すフレームバッファを作成する
+    let frame_buffer = create_frame_buffer(graphics_output);
+
+    // ブートサービスの停止
+    let system_table_runtime = exit_boot_services(image_handle, system_table);
+
+    // カーネル呼び出し
+    entry_point(&frame_buffer);
+
+    info!("complete");
+    // シャットダウン
+    unsafe {
+        system_table_runtime
+            .runtime_services()
+            .reset(ResetType::Shutdown, Status::SUCCESS, None);
     }
+}
 
-    // ローダーの挙動を目で見るために3秒待機
-    system_table.boot_services().stall(3_000_000);
+/// ブートサービスを停止する
+fn exit_boot_services(
+    image_handle: Handle,
+    system_table: SystemTable<Boot>,
+) -> SystemTable<Runtime> {
+    let enough_mmap_size = system_table.boot_services().memory_map_size().map_size
+        + 8 * mem::size_of::<MemoryDescriptor>();
+    let mut mmap_buf = vec![0; enough_mmap_size];
+    let (system_table_runtime, _) = system_table
+        .exit_boot_services(image_handle, &mut mmap_buf[..])
+        .expect_success("Failed to exit boot services");
+    mem::forget(mmap_buf);
+    system_table_runtime
+}
 
-    // 指定した解像度を持つモードへ変更
-    let m = graphics_output.modes().nth(18).unwrap().unwrap();
-    graphics_output.set_mode(&m).unwrap_success();
-
-    // カーネルに渡すフレームバッファを作成
+/// フレームバッファを作成する
+fn create_frame_buffer(graphics_output: &mut GraphicsOutput) -> FrameBuffer {
     let frame_buffer = FrameBuffer {
         frame_buffer: graphics_output.frame_buffer().as_mut_ptr(),
         stride: graphics_output.current_mode_info().stride() as u32,
@@ -97,30 +119,31 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
             f => panic!("Unsupported pixel format: {:?}", f),
         },
     };
-
-    // ブートサービスの停止
-    let enough_mmap_size = system_table.boot_services().memory_map_size().map_size
-        + 8 * mem::size_of::<MemoryDescriptor>();
-    let mut mmap_buf = vec![0; enough_mmap_size];
-    let (system_table, _) = system_table
-        .exit_boot_services(image_handle, &mut mmap_buf[..])
-        .expect_success("Failed to exit boot services");
-    mem::forget(mmap_buf);
-
-    // カーネル呼び出し
-    entry_point(&frame_buffer);
-
-    info!("complete");
-    // シャットダウン
-    unsafe {
-        system_table
-            .runtime_services()
-            .reset(ResetType::Shutdown, Status::SUCCESS, None);
-    }
+    frame_buffer
 }
 
-fn change_resolution(graphics_output: GraphicsOutput, image_handle: Handle) {}
+/// 解像度を変更する
+fn change_resolution(
+    graphics_output: &mut GraphicsOutput,
+    image_handle: Handle,
+    system_table: &SystemTable<Boot>,
+) {
+    let modes = graphics_output.modes();
+    for (i, mode) in modes.enumerate() {
+        let m: Mode = mode.unwrap();
+        let (horizontal, vertical) = m.info().resolution();
+        info!("{}, horizontal: {}, vertical: {}", i, horizontal, vertical);
+    }
 
+    // ローダーの挙動を目で見るために3秒待機
+    system_table.boot_services().stall(3_000_000);
+
+    // 指定した解像度を持つモードへ変更
+    let m = graphics_output.modes().nth(18).unwrap().unwrap();
+    graphics_output.set_mode(&m).unwrap_success();
+}
+
+/// ファイルを作成する
 fn create_file(image_handle: Handle, system_table: &SystemTable<Boot>) -> RegularFile {
     let file_system = unsafe {
         &mut *system_table
@@ -149,6 +172,7 @@ fn create_file(image_handle: Handle, system_table: &SystemTable<Boot>) -> Regula
     return file;
 }
 
+/// メモリマップを書き込む
 fn write_memory_descriptor(system_table: &SystemTable<Boot>, mut file: RegularFile) {
     let size = system_table.boot_services().memory_map_size().map_size
         + 8 * mem::size_of::<MemoryDescriptor>();
@@ -200,6 +224,7 @@ fn get_file(image_handle: Handle, system_table: &SystemTable<Boot>, filepath: &s
     file
 }
 
+/// ファイルのサイズを取得する
 fn size_of(file: &mut RegularFile) -> usize {
     let size = file
         .get_boxed_info::<FileInfo>()
@@ -208,6 +233,7 @@ fn size_of(file: &mut RegularFile) -> usize {
     size
 }
 
+/// ファイルの内容をVecに読み込む
 fn read_file_to_vec(file: &mut RegularFile) -> Vec<u8> {
     let size = size_of(file);
     info!("elf size: {}", size);
@@ -217,6 +243,7 @@ fn read_file_to_vec(file: &mut RegularFile) -> Vec<u8> {
     buf
 }
 
+/// カーネルのELFファイルをメモリ上に配置しエントリーポイントのアドレスを返す
 fn load_kernel(image_handle: Handle, system_table: &SystemTable<Boot>) -> usize {
     let mut file = get_file(image_handle, system_table, "kernel.elf");
 
@@ -270,20 +297,6 @@ fn load_kernel(image_handle: Handle, system_table: &SystemTable<Boot>) -> usize 
         dest[..fsize].copy_from_slice(&buf[ofs..ofs + fsize]);
         dest[fsize..].fill(0);
     }
-
-    // ELFのヘッダーのエントリーポイントのアドレスを関数ポインタとして扱う
-    // その関数はFrameBufferを引数とする
-    //let entry_point: extern "sysv64" fn(&FrameBuffer) = unsafe { mem::transmute(elf.entry) };
-
-    // info!("exit boot services");
-    // let enough_mmap_size = system_table.boot_services().memory_map_size().map_size
-    //     + 8 * mem::size_of::<MemoryDescriptor>();
-    // let mut mmap_buf = vec![0; enough_mmap_size];
-    // &system_table.exit_boot_services(image_handle, &mut mmap_buf[..]);
-    // mem::forget(mmap_buf);
-
-    //info!("invoke entry_point");
-    //(entry_point, &frame_buffer);
 
     elf.entry as usize
 }
