@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+include!(concat!(env!("OUT_DIR"), "/hello.rs"));
+
 #[repr(C)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 pub enum MyPixelFormat {
@@ -20,8 +22,12 @@ pub struct FrameBuffer {
 #[no_mangle]
 pub extern "sysv64" fn kernel_main(fb: &FrameBuffer) {
     match fb.format {
-        MyPixelFormat::Rgb => render_example::<RgbPixelWriter>(fb),
-        MyPixelFormat::Bgr => render_example::<BgrPixelWriter>(fb),
+        MyPixelFormat::Rgb => {
+            render_example::<RgbPixelWriter>(fb);
+        }
+        MyPixelFormat::Bgr => {
+            render_example::<BgrPixelWriter>(fb);
+        }
     }
     loop {
         unsafe {
