@@ -12,7 +12,7 @@ use core::{mem, slice};
 use goblin::elf;
 use log::info;
 use uefi::prelude::*;
-use uefi::proto::console::gop::{GraphicsOutput, Mode, ModeInfo, PixelFormat};
+use uefi::proto::console::gop::{GraphicsOutput, Mode, PixelFormat};
 use uefi::proto::media::file::{
     Directory, File, FileAttribute, FileHandle, FileInfo, FileMode, RegularFile,
 };
@@ -69,7 +69,7 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
     let graphics_output = unsafe { &mut *graphics_output_unsafe.get() };
 
     // 解像度を変更する
-    change_resolution(graphics_output, image_handle, &system_table);
+    change_resolution(graphics_output, &system_table);
 
     // カーネルに渡すフレームバッファを作成する
     let frame_buffer = create_frame_buffer(graphics_output);
@@ -123,11 +123,7 @@ fn create_frame_buffer(graphics_output: &mut GraphicsOutput) -> FrameBuffer {
 }
 
 /// 解像度を変更する
-fn change_resolution(
-    graphics_output: &mut GraphicsOutput,
-    image_handle: Handle,
-    system_table: &SystemTable<Boot>,
-) {
+fn change_resolution(graphics_output: &mut GraphicsOutput, system_table: &SystemTable<Boot>) {
     let modes = graphics_output.modes();
     for (i, mode) in modes.enumerate() {
         let m: Mode = mode.unwrap();
