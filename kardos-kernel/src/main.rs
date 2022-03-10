@@ -3,6 +3,12 @@
 
 include!(concat!(env!("OUT_DIR"), "/latin1_font.rs"));
 
+pub const BLACK: (u8, u8, u8) = (0, 0, 0);
+pub const WHITE: (u8, u8, u8) = (255, 255, 255);
+pub const RED: (u8, u8, u8) = (255, 0, 0);
+pub const GREEN: (u8, u8, u8) = (0, 255, 0);
+pub const BLUE: (u8, u8, u8) = (0, 0, 255);
+
 #[repr(C)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 pub enum MyPixelFormat {
@@ -24,18 +30,19 @@ pub extern "sysv64" fn kernel_main(fb: &FrameBuffer) {
     match fb.format {
         MyPixelFormat::Rgb => {
             render_example::<RgbPixelWriter>(fb);
-            render_font::<RgbPixelWriter>(fb, 10, 10, (0, 0, 0), &LATIN1_FONT[0x41]);
-            render_font::<RgbPixelWriter>(fb, 20, 10, (0, 0, 0), &LATIN1_FONT[0x42]);
-            render_font::<RgbPixelWriter>(fb, 30, 10, (0, 0, 0), &LATIN1_FONT[0x43]);
         }
         MyPixelFormat::Bgr => {
             render_example::<BgrPixelWriter>(fb);
-            render_font::<BgrPixelWriter>(fb, 10, 20, (0, 0, 0), &LATIN1_FONT[0x50]);
-            render_font::<BgrPixelWriter>(fb, 20, 20, (0, 0, 0), &LATIN1_FONT[0x51]);
-            render_font::<BgrPixelWriter>(fb, 30, 20, (0, 0, 0), &LATIN1_FONT[0x52]);
-            render_font::<BgrPixelWriter>(fb, 40, 20, (0, 0, 0), &LATIN1_FONT[0x53]);
         }
     }
+
+    print_font(fb, 60, 20, BLACK, 'g');
+    print_font(fb, 70, 20, RED, '[');
+    print_font(fb, 80, 20, GREEN, '\\');
+    print_font(fb, 90, 20, BLUE, 'y');
+    print_font(fb, 100, 20, WHITE, 'm');
+    print_string(fb, 150, 20, BLACK, "Hello, world!");
+
     loop {
         unsafe {
             core::arch::asm!("hlt");
@@ -87,6 +94,27 @@ fn render_example<W: PixelWriter>(fb: &FrameBuffer) {
     }
 }
 
+fn print_string(fb: &FrameBuffer, x: u32, y: u32, color: (u8, u8, u8), string: &str) {
+    for (i, c) in string.chars().enumerate() {
+        print_font(fb, x + i as u32 * 8, y, color, c);
+    }
+}
+
+/// フォントを描画する. colorはRGBの順番で指定する.
+fn print_font(fb: &FrameBuffer, x: u32, y: u32, color: (u8, u8, u8), c: char) {
+    // 配列のインデックスはusizeである必要がある
+    let num = c as usize - 1;
+
+    match fb.format {
+        MyPixelFormat::Rgb => {
+            render_font::<RgbPixelWriter>(fb, x, y, color, &LATIN1_FONT[num]);
+        }
+        MyPixelFormat::Bgr => {
+            render_font::<BgrPixelWriter>(fb, x, y, color, &LATIN1_FONT[num]);
+        }
+    }
+}
+
 fn render_font<W: PixelWriter>(
     fb: &FrameBuffer,
     x: u32,
@@ -94,8 +122,9 @@ fn render_font<W: PixelWriter>(
     color: (u8, u8, u8),
     font: &[u8; 14],
 ) {
-    for dy in 0..13 {
-        for dx in 0..7 {
+    // 0, 1, 2, ..., 13までのループであることに注意
+    for dy in 0..14 {
+        for dx in 0..8 {
             if (font[dy] << dx) & 0x80 != 0 {
                 let px = x + dx;
                 let py = y + (dy as u32);
