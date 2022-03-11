@@ -9,7 +9,7 @@ pub const BLUE: (u8, u8, u8) = (0, 0, 255);
 // 文字列を描画する.1文字目の座標を指定する.colorはRGBの順番で指定する.
 pub fn print_string(fb: &FrameBuffer, x: u32, y: u32, color: (u8, u8, u8), string: &str) {
     for (i, c) in string.chars().enumerate() {
-        print_font(fb, x + i as u32 * 8, y, color, c);
+        print_font(fb, x + i as u32 * 10, y, color, c);
     }
 }
 
@@ -90,12 +90,11 @@ fn render_font<W: PixelWriter>(
     x: u32,
     y: u32,
     color: (u8, u8, u8),
-    font: &[u8; 14],
+    font: &[u16; 18],
 ) {
-    // 0, 1, 2, ..., 13までのループであることに注意
-    for dy in 0..14 {
-        for dx in 0..8 {
-            if (font[dy] << dx) & 0x80 != 0 {
+    for dy in 0..18 {
+        for dx in 0..9 {
+            if (font[dy] << dx) & 0b1000000000 != 0 {
                 let px = x + dx;
                 let py = y + (dy as u32);
                 W::put_pixel(fb, px, py, color);

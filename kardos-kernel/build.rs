@@ -6,7 +6,7 @@ use std::{
 };
 
 fn main() {
-    let input_path = Path::new("./src/shinonome-0.9.11/14/latin1/font_src.bit");
+    let input_path = Path::new("./src/shinonome-0.9.11/18/latin1/font_src.bit");
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let output_path = Path::new(&out_dir).join("latin1_font.rs");
 
@@ -22,7 +22,7 @@ fn main() {
 
     writeln!(
         &mut output_buffer_writer,
-        "pub const LATIN1_FONT: [[u8; 14]; 221] = ["
+        "pub const LATIN1_FONT: [[u16; 18]; 221] = ["
     )
     .unwrap();
 
@@ -37,7 +37,7 @@ fn main() {
             writeln!(&mut output_buffer_writer, "],").unwrap();
         }
         if in_char && (line.starts_with('.') || line.starts_with('@')) {
-            let mut output_num: u8 = 0;
+            let mut output_num: u16 = 0;
             for c in line.chars() {
                 let bit = match c {
                     '.' => 0,

@@ -131,8 +131,8 @@ fn change_resolution(graphics_output: &mut GraphicsOutput, system_table: &System
         info!("{}, horizontal: {}, vertical: {}", i, horizontal, vertical);
     }
 
-    // ローダーの挙動を目で見るために3秒待機
-    system_table.boot_services().stall(3_000_000);
+    // ローダーの挙動を目で見るために0.5秒待機
+    system_table.boot_services().stall(500_000);
 
     // 指定した解像度を持つモードへ変更
     let m = graphics_output.modes().nth(18).unwrap().unwrap();
