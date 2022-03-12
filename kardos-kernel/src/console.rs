@@ -1,13 +1,18 @@
 use crate::graphics;
 
-const ROWS: usize = 25;
-const COLS: usize = 80;
+// コンソールの縦横文字数
+const ROWS: usize = 30;
+const COLS: usize = 50;
+
+// フォント１文字の縦横ピクセル数
+const FONT_DX: u32 = 10;
+const FONT_DY: u32 = 18;
 
 pub struct Console<'a> {
     fb: &'a graphics::FrameBuffer,
     fg_color: (u8, u8, u8),
     bg_color: (u8, u8, u8),
-    buffer: [[char; ROWS]; COLS + 1],
+    buffer: [[char; COLS]; ROWS],
     cursor_row: usize,
     cursor_col: usize,
 }
@@ -19,7 +24,7 @@ impl<'a> Console<'a> {
             fb,
             fg_color: graphics::WHITE,
             bg_color: graphics::BLACK,
-            buffer: [['\0'; ROWS]; COLS + 1],
+            buffer: [['\0'; COLS]; ROWS],
             cursor_row: 0,
             cursor_col: 0,
         };
@@ -35,8 +40,8 @@ impl<'a> Console<'a> {
             } else if self.cursor_col < COLS - 1 {
                 graphics::print_font(
                     self.fb,
-                    self.cursor_col as u32 * 10,
-                    self.cursor_row as u32 * 18,
+                    self.cursor_col as u32 * FONT_DX,
+                    self.cursor_row as u32 * FONT_DY,
                     self.fg_color,
                     c,
                 );
@@ -52,8 +57,8 @@ impl<'a> Console<'a> {
             self.fb,
             0,
             0,
-            COLS as u32 * 10,
-            ROWS as u32 * 18,
+            COLS as u32 * FONT_DX,
+            ROWS as u32 * FONT_DY,
             self.bg_color,
         );
     }
@@ -65,11 +70,30 @@ impl<'a> Console<'a> {
             self.cursor_row += 1;
         } else {
             self.paint_background();
-            for r in 0..ROWS {
+            for row_index in 0..ROWS - 1 {
                 // 一つ上の行へ移動
+                self.buffer[row_index] = self.buffer[row_index + 1];
+
                 // 行をプリント
+                for col_index in 0..COLS {
+                    if self.buffer[row_index][col_index] == '\0' {
+                        break;
+                    }
+                    self.print_font_from_buffer(row_index, col_index);
+                }
             }
-            // 最下行をnull文字で埋める
+            // バッファの最下行をnull文字で埋める
+            self.buffer[ROWS - 1] = [' '; COLS];
         }
+    }
+
+    fn print_font_from_buffer(&mut self, row_index: usize, col_index: usize) {
+        graphics::print_font(
+            self.fb,
+            col_index as u32 * FONT_DX,
+            row_index as u32 * FONT_DY,
+            self.fg_color,
+            self.buffer[row_index][col_index],
+        );
     }
 }
