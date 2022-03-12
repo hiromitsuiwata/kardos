@@ -28,6 +28,32 @@ pub fn print_font(fb: &FrameBuffer, x: u32, y: u32, color: (u8, u8, u8), c: char
     }
 }
 
+pub fn paint_rectangle(
+    fb: &FrameBuffer,
+    min_x: u32,
+    min_y: u32,
+    max_x: u32,
+    max_y: u32,
+    color: (u8, u8, u8),
+) {
+    match fb.format {
+        MyPixelFormat::Rgb => {
+            for x in min_x..max_x + 1 {
+                for y in min_y..max_y + 1 {
+                    RgbPixelWriter::put_pixel(fb, x, y, color);
+                }
+            }
+        }
+        MyPixelFormat::Bgr => {
+            for x in min_x..max_x + 1 {
+                for y in min_y..max_y + 1 {
+                    RgbPixelWriter::put_pixel(fb, x, y, color);
+                }
+            }
+        }
+    }
+}
+
 pub fn print_example(fb: &FrameBuffer) {
     match fb.format {
         MyPixelFormat::Rgb => {
